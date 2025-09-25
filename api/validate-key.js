@@ -45,10 +45,11 @@ import OpenAI from 'openai';
         } else if (provider.toLowerCase() === 'google') {
           try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            // Для Gemini, можно попробовать получить модель. Это проверит ключ.
+            // Для Gemini, самый надежный способ проверить ключ - это сделать
+            // легковесный запрос к API. Запрос списка моделей в этом SDK
+            // недоступен, поэтому используем `countTokens` как аналог.
             const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-            // И сделать самый дешевый запрос - подсчет токенов
-            await model.countTokens("test");
+            await model.countTokens("ping"); // Успешный вызов подтверждает, что ключ валиден.
             isValid = true;
           } catch (error) {
             isValid = false;
