@@ -73,9 +73,9 @@ import OpenAI from 'openai';
         res.end(JSON.stringify({ models }));
 
       } catch (error) {
-        console.error('Error in validate-key handler:', error);
+        console.error("Error during key validation:", error);
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Failed to validate key or fetch models.', details: error.message }));
+        res.end(JSON.stringify({ error: "Internal Server Error", details: error.message }));
       }
     }
