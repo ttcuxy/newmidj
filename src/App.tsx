@@ -10,18 +10,7 @@ import React, { useState, useRef } from 'react';
       results: (string | null)[];
     };
 
-    // Определение моделей для каждого провайдера
-    const modelOptions = {
-      OpenAI: [
-        { value: 'gpt-4o', label: 'ChatGPT 4o' },
-        { value: 'gpt-4-turbo', label: 'ChatGPT 4 Turbo' },
-      ],
-      Google: [
-        { value: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro' },
-        { value: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash' },
-      ],
-    };
-    type Provider = keyof typeof modelOptions;
+    type Provider = 'OpenAI' | 'Google';
 
 
     // Вспомогательная функция для конвертации File в base64
@@ -49,7 +38,9 @@ import React, { useState, useRef } from 'react';
       const [isCheckingApiKey, setIsCheckingApiKey] = useState(false);
 
       const [selectedProvider, setSelectedProvider] = useState<Provider>('OpenAI');
-      const [selectedModel, setSelectedModel] = useState(modelOptions.OpenAI[0].value);
+      const [selectedModel, setSelectedModel] = useState('');
+      const [availableModels, setAvailableModels] = useState<string[]>([]);
+
 
       const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -61,7 +52,8 @@ import React, { useState, useRef } from 'react';
           return;
         }
         setIsCheckingApiKey(true);
-        setApiKeyStatus('idle'); // Сбрасываем статус перед проверкой
+        setApiKeyStatus('idle');
+        setAvailableModels([]); // Очищаем старый список моделей
 
         try {
           const response = await fetch('/api/validate-key', {
@@ -73,16 +65,26 @@ import React, { useState, useRef } from 'react';
             }),
           });
 
+          const data = await response.json();
+
           if (!response.ok) {
-            throw new Error('Ошибка сервера при проверке ключа.');
+            throw new Error(data.details || 'Ошибка сервера при проверке ключа.');
           }
 
-          const data = await response.json();
-          setApiKeyStatus(data.valid ? 'valid' : 'invalid');
+          setApiKeyStatus('valid');
+          setAvailableModels(data.models);
+          // Устанавливаем первую модель из списка как выбранную по умолчанию
+          if (data.models && data.models.length > 0) {
+            setSelectedModel(data.models[0]);
+          } else {
+            setSelectedModel('');
+          }
 
         } catch (error) {
           console.error('Ошибка при проверке API ключа:', error);
           setApiKeyStatus('invalid');
+          setAvailableModels([]);
+          setSelectedModel('');
         } finally {
           setIsCheckingApiKey(false);
         }
@@ -92,8 +94,10 @@ import React, { useState, useRef } from 'react';
       const handleProviderChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
         const newProvider = event.target.value as Provider;
         setSelectedProvider(newProvider);
-        setSelectedModel(modelOptions[newProvider][0].value);
-        setApiKeyStatus('idle'); // Сбрасываем статус при смене провайдера
+        // Сбрасываем все, что связано с ключом и моделями
+        setApiKeyStatus('idle');
+        setAvailableModels([]);
+        setSelectedModel('');
       };
 
       const handleUploadClick = () => {
@@ -214,13 +218,20 @@ import React, { useState, useRef } from 'react';
                       </select>
                       <select
                         id="ai-model"
-                        className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                        className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none disabled:bg-gray-600 disabled:cursor-not-allowed"
                         value={selectedModel}
                         onChange={(e) => setSelectedModel(e.target.value)}
+                        disabled={availableModels.length === 0}
                       >
-                        {modelOptions[selectedProvider].map(model => (
-                          <option key={model.value} value={model.value}>{model.label}</option>
-                        ))}
+                        {availableModels.length > 0 ? (
+                          availableModels.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))
+                        ) : (
+                          <option value="" disabled>
+                            {apiKeyStatus === 'invalid' ? 'Ключ невалиден' : 'Сначала проверьте ключ'}
+                          </option>
+                        )}
                       </select>
                     </div>
                   </div>
@@ -236,7 +247,9 @@ import React, { useState, useRef } from 'react';
                         value={apiKey}
                         onChange={(e) => {
                           setApiKey(e.target.value);
-                          setApiKeyStatus('idle'); // Сбрасываем статус при изменении ключа
+                          setApiKeyStatus('idle');
+                          setAvailableModels([]);
+                          setSelectedModel('');
                         }}
                       />
                       <button
@@ -247,11 +260,13 @@ import React, { useState, useRef } from 'react';
                         {isCheckingApiKey ? <LoaderCircle size={18} className="animate-spin" /> : 'Проверить'}
                       </button>
                       <div className="w-6 h-6 flex items-center justify-center">
-                        {isCheckingApiKey ? <LoaderCircle size={20} className="animate-spin text-gray-500" /> : (
-                          <>
-                            {apiKeyStatus === 'valid' && <CheckCircle className="text-green-500" />}
-                            {apiKeyStatus === 'invalid' && <XCircle className="text-red-500" />}
-                          </>
+                        {apiKeyStatus === 'idle' ? null : (
+                          isCheckingApiKey ? <LoaderCircle size={20} className="animate-spin text-gray-500" /> : (
+                            <>
+                              {apiKeyStatus === 'valid' && <CheckCircle className="text-green-500" />}
+                              {apiKeyStatus === 'invalid' && <XCircle className="text-red-500" />}
+                            </>
+                          )
                         )}
                       </div>
                     </div>
@@ -268,7 +283,7 @@ import React, { useState, useRef } from 'react';
                     <button
                       onClick={handleGetPrompts}
                       className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center gap-2 transition-colors disabled:bg-purple-800 disabled:cursor-not-allowed"
-                      disabled={isLoadingPrompts || isLoadingImages}
+                      disabled={isLoadingPrompts || isLoadingImages || apiKeyStatus !== 'valid' || tableData.length === 0}
                     >
                       {isLoadingPrompts ? <LoaderCircle size={18} className="animate-spin" /> : <Sparkles size={18} />}
                       {isLoadingPrompts ? 'Получение...' : 'Получить промты'}

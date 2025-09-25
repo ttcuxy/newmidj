@@ -1,8 +1,7 @@
 import OpenAI from 'openai';
-    import { GoogleGenerativeAI } from '@google/generative-ai';
 
     /**
-     * Обработчик для валидации API ключа
+     * Обработчик для получения списка моделей на основе API ключа
      * @param {import('http').IncomingMessage} req
      * @param {import('http').ServerResponse} res
      */
@@ -29,32 +28,39 @@ import OpenAI from 'openai';
           return;
         }
 
-        let isValid = false;
+        let models = [];
 
         if (provider.toLowerCase() === 'openai') {
-          try {
-            const openai = new OpenAI({ apiKey });
-            // Делаем очень дешевый запрос для проверки ключа - получаем список моделей
-            await openai.models.list();
-            isValid = true;
-          } catch (error) {
-            // Если API вернуло ошибку (например, 401 Unauthorized), ключ невалиден
-            isValid = false;
-            console.error("OpenAI key validation failed:", error.message);
-          }
+          const openai = new OpenAI({ apiKey });
+          const modelsList = await openai.models.list();
+          // Фильтруем и оставляем только gpt модели, чтобы не было лишнего
+          models = modelsList.data
+            .filter(model => model.id.startsWith('gpt'))
+            .map(model => model.id)
+            .sort()
+            .reverse();
+
         } else if (provider.toLowerCase() === 'google') {
-          try {
-            const genAI = new GoogleGenerativeAI(apiKey);
-            // Для Gemini, самый надежный способ проверить ключ - это сделать
-            // легковесный запрос к API. Запрос списка моделей в этом SDK
-            // недоступен, поэтому используем `countTokens` как аналог.
-            const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-            await model.countTokens("ping"); // Успешный вызов подтверждает, что ключ валиден.
-            isValid = true;
-          } catch (error) {
-            isValid = false;
-            console.error("Google/Gemini key validation failed:", error.message);
+          // Для Google Gemini API используем REST API для получения списка моделей,
+          // так как SDK не предоставляет прямого метода listModels()
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error?.message || 'Invalid Google API Key or API is not enabled.');
           }
+
+          const data = await response.json();
+          // Фильтруем модели, которые поддерживают генерацию контента и являются "tuned" (основными)
+          models = data.models
+            .filter(model =>
+              model.supportedGenerationMethods.includes('generateContent') &&
+              model.name.includes('gemini') // Убедимся, что это Gemini модель
+            )
+            .map(model => model.name.replace('models/', '')) // Убираем префикс 'models/'
+            .sort()
+            .reverse();
+
         } else {
           res.statusCode = 400;
           res.setHeader('Content-Type', 'application/json');
@@ -64,12 +70,12 @@ import OpenAI from 'openai';
 
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ valid: isValid }));
+        res.end(JSON.stringify({ models }));
 
       } catch (error) {
         console.error('Error in validate-key handler:', error);
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Internal server error.', details: error.message }));
+        res.end(JSON.stringify({ error: 'Failed to validate key or fetch models.', details: error.message }));
       }
     }
