@@ -1,14 +1,30 @@
 import React, { useState, useRef } from 'react';
     import { Bot, KeyRound, Upload, Sparkles, Play, Download, Image as ImageIcon, CheckCircle, XCircle, LoaderCircle } from 'lucide-react';
 
-    // Обновленный тип для данных в строке таблицы
+    // Тип для данных в строке таблицы
     type TableRowData = {
       id: number;
-      file: File; // Сам файл
-      originalImage: string; // URL для превью
+      file: File;
+      originalImage: string;
       prompt: string;
-      results: (string | null)[]; // Массив из 4 URL-адресов изображений
+      results: (string | null)[];
     };
+
+    // Вспомогательная функция для конвертации File в base64
+    const fileToBase64 = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => {
+          // Результат в формате "data:image/jpeg;base64,..."
+          // Нам нужна только часть после запятой
+          const base64String = (reader.result as string).split(',')[1];
+          resolve(base64String);
+        };
+        reader.onerror = (error) => reject(error);
+      });
+    };
+
 
     function App() {
       // --- Состояния Компонента ---
@@ -18,13 +34,12 @@ import React, { useState, useRef } from 'react';
       const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
       const [isLoadingImages, setIsLoadingImages] = useState(false);
       const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+      const [selectedModel, setSelectedModel] = useState('ChatGPT 4.0');
 
-      // Ref для скрытого input-элемента
       const fileInputRef = useRef<HTMLInputElement>(null);
 
       const checkApiKey = () => {
-        // Заглушка для логики проверки API ключа
-        setIsLoadingPrompts(true); // Используем для индикации проверки
+        setIsLoadingPrompts(true);
         setTimeout(() => {
           const randomStatus = Math.random() > 0.5 ? 'valid' : 'invalid';
           setApiKeyStatus(randomStatus);
@@ -35,36 +50,94 @@ import React, { useState, useRef } from 'react';
 
       // --- Обработчики событий ---
 
-      // 1. Вызывает клик на скрытом input
       const handleUploadClick = () => {
         fileInputRef.current?.click();
       };
 
-      // 2. Обрабатывает выбранные файлы
       const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
         if (!files) return;
 
         const newFilesData = Array.from(files).map((file, index) => ({
-          id: Date.now() + index, // Простой уникальный ID
+          id: Date.now() + index,
           file: file,
-          originalImage: URL.createObjectURL(file), // Создаем URL для превью
+          originalImage: URL.createObjectURL(file),
           prompt: '',
           results: [null, null, null, null],
         }));
 
         setTableData(prevData => [...prevData, ...newFilesData]);
 
-        // Очищаем value, чтобы можно было загрузить те же файлы снова
         if (event.target) {
           event.target.value = '';
         }
       };
 
+      // Обработчик для кнопки "Получить промты"
+      const handleGetPrompts = async () => {
+        if (!apiKey) {
+          alert('Пожалуйста, введите ваш API-ключ.');
+          return;
+        }
+        if (tableData.length === 0) {
+          alert('Пожалуйста, загрузите изображения.');
+          return;
+        }
+
+        setIsLoadingPrompts(true);
+
+        for (const row of tableData) {
+          // Пропускаем, если промт уже есть
+          if (row.prompt) continue;
+
+          try {
+            const imageBase64 = await fileToBase64(row.file);
+
+            const response = await fetch('/api/generate-prompt', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                systemPrompt,
+                apiKey,
+                modelName: selectedModel,
+                imageBase64,
+              }),
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.details || 'Ошибка при генерации промта.');
+            }
+
+            const data = await response.json();
+            const newPrompt = data.prompt;
+
+            // Обновляем состояние иммутабельно, чтобы React заметил изменения
+            setTableData(currentData =>
+              currentData.map(item =>
+                item.id === row.id ? { ...item, prompt: newPrompt } : item
+              )
+            );
+
+          } catch (error: any) {
+            console.error(`Ошибка для файла ${row.file.name}:`, error);
+            // Записываем ошибку в поле промта для наглядности
+            setTableData(currentData =>
+              currentData.map(item =>
+                item.id === row.id ? { ...item, prompt: `Ошибка: ${error.message}` } : item
+              )
+            );
+          }
+        }
+
+        setIsLoadingPrompts(false);
+      };
+
 
       return (
         <div className="min-h-screen bg-gray-900 text-gray-300 font-sans p-4 sm:p-6 lg:p-8">
-          {/* Скрытый input для загрузки файлов */}
           <input
             type="file"
             multiple
@@ -84,19 +157,21 @@ import React, { useState, useRef } from 'react';
             </header>
 
             <main>
-              {/* Панель управления */}
               <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
-                  {/* Выбор нейросети */}
                   <div className="flex flex-col gap-2">
                     <label htmlFor="ai-model" className="font-medium text-white flex items-center gap-2"><Bot size={18} />Выберите нейросеть</label>
-                    <select id="ai-model" className="bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none">
+                    <select
+                      id="ai-model"
+                      className="bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                    >
                       <option>ChatGPT 4.0</option>
                       <option>Gemini Pro</option>
                     </select>
                   </div>
 
-                  {/* API-ключ */}
                   <div className="flex flex-col gap-2">
                     <label htmlFor="api-key" className="font-medium text-white flex items-center gap-2"><KeyRound size={18} />Ваш API-ключ</label>
                     <div className="flex items-center gap-2">
@@ -116,7 +191,6 @@ import React, { useState, useRef } from 'react';
                     </div>
                   </div>
 
-                  {/* Главные кнопки */}
                   <div className="flex flex-wrap gap-3 md:col-span-2 lg:col-span-1 lg:justify-self-end">
                     <button
                       onClick={handleUploadClick}
@@ -126,6 +200,7 @@ import React, { useState, useRef } from 'react';
                       <Upload size={18} /> Загрузить
                     </button>
                     <button
+                      onClick={handleGetPrompts}
                       className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center gap-2 transition-colors disabled:bg-purple-800 disabled:cursor-not-allowed"
                       disabled={isLoadingPrompts || isLoadingImages}
                     >
@@ -143,7 +218,6 @@ import React, { useState, useRef } from 'react';
                 </div>
               </div>
 
-              {/* Системный промт */}
               <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
                 <label htmlFor="system-prompt" className="block font-medium text-white mb-2">Системный промт:</label>
                 <textarea
@@ -156,7 +230,6 @@ import React, { useState, useRef } from 'react';
                 ></textarea>
               </div>
 
-              {/* Секция результатов */}
               <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-2xl font-bold text-white">Результаты</h2>
@@ -190,7 +263,6 @@ import React, { useState, useRef } from 'react';
                             <td className="p-4 align-top">{index + 1}</td>
                             <td className="p-4 align-top">
                               <div className="w-24 h-24 bg-gray-700 rounded-md flex items-center justify-center">
-                                {/* Отображаем превью */}
                                 <img src={row.originalImage} alt="Original" className="w-full h-full object-cover rounded-md" />
                               </div>
                             </td>
