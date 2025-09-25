@@ -10,14 +10,26 @@ import React, { useState, useRef } from 'react';
       results: (string | null)[];
     };
 
+    // Определение моделей для каждого провайдера
+    const modelOptions = {
+      OpenAI: [
+        { value: 'gpt-4o', label: 'ChatGPT 4o' },
+        { value: 'gpt-4-turbo', label: 'ChatGPT 4 Turbo' },
+      ],
+      Google: [
+        { value: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro' },
+        { value: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash' },
+      ],
+    };
+    type Provider = keyof typeof modelOptions;
+
+
     // Вспомогательная функция для конвертации File в base64
     const fileToBase64 = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = () => {
-          // Результат в формате "data:image/jpeg;base64,..."
-          // Нам нужна только часть после запятой
           const base64String = (reader.result as string).split(',')[1];
           resolve(base64String);
         };
@@ -34,21 +46,55 @@ import React, { useState, useRef } from 'react';
       const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
       const [isLoadingImages, setIsLoadingImages] = useState(false);
       const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
-      const [selectedModel, setSelectedModel] = useState('ChatGPT 4.0');
+      const [isCheckingApiKey, setIsCheckingApiKey] = useState(false);
+
+      const [selectedProvider, setSelectedProvider] = useState<Provider>('OpenAI');
+      const [selectedModel, setSelectedModel] = useState(modelOptions.OpenAI[0].value);
 
       const fileInputRef = useRef<HTMLInputElement>(null);
 
-      const checkApiKey = () => {
-        setIsLoadingPrompts(true);
-        setTimeout(() => {
-          const randomStatus = Math.random() > 0.5 ? 'valid' : 'invalid';
-          setApiKeyStatus(randomStatus);
-          setIsLoadingPrompts(false);
-          setTimeout(() => setApiKeyStatus('idle'), 3000);
-        }, 1500);
+      // --- Обработчики событий ---
+
+      const checkApiKey = async () => {
+        if (!apiKey) {
+          alert('Пожалуйста, введите API-ключ для проверки.');
+          return;
+        }
+        setIsCheckingApiKey(true);
+        setApiKeyStatus('idle'); // Сбрасываем статус перед проверкой
+
+        try {
+          const response = await fetch('/api/validate-key', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              apiKey,
+              provider: selectedProvider,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error('Ошибка сервера при проверке ключа.');
+          }
+
+          const data = await response.json();
+          setApiKeyStatus(data.valid ? 'valid' : 'invalid');
+
+        } catch (error) {
+          console.error('Ошибка при проверке API ключа:', error);
+          setApiKeyStatus('invalid');
+        } finally {
+          setIsCheckingApiKey(false);
+        }
       };
 
-      // --- Обработчики событий ---
+
+      const handleProviderChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const newProvider = event.target.value as Provider;
+        setSelectedProvider(newProvider);
+        setSelectedModel(modelOptions[newProvider][0].value);
+        setApiKeyStatus('idle'); // Сбрасываем статус при смене провайдера
+      };
 
       const handleUploadClick = () => {
         fileInputRef.current?.click();
@@ -73,7 +119,6 @@ import React, { useState, useRef } from 'react';
         }
       };
 
-      // Обработчик для кнопки "Получить промты"
       const handleGetPrompts = async () => {
         if (!apiKey) {
           alert('Пожалуйста, введите ваш API-ключ.');
@@ -87,7 +132,6 @@ import React, { useState, useRef } from 'react';
         setIsLoadingPrompts(true);
 
         for (const row of tableData) {
-          // Пропускаем, если промт уже есть
           if (row.prompt) continue;
 
           try {
@@ -95,9 +139,7 @@ import React, { useState, useRef } from 'react';
 
             const response = await fetch('/api/generate-prompt', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 systemPrompt,
                 apiKey,
@@ -114,7 +156,6 @@ import React, { useState, useRef } from 'react';
             const data = await response.json();
             const newPrompt = data.prompt;
 
-            // Обновляем состояние иммутабельно, чтобы React заметил изменения
             setTableData(currentData =>
               currentData.map(item =>
                 item.id === row.id ? { ...item, prompt: newPrompt } : item
@@ -123,7 +164,6 @@ import React, { useState, useRef } from 'react';
 
           } catch (error: any) {
             console.error(`Ошибка для файла ${row.file.name}:`, error);
-            // Записываем ошибку в поле промта для наглядности
             setTableData(currentData =>
               currentData.map(item =>
                 item.id === row.id ? { ...item, prompt: `Ошибка: ${error.message}` } : item
@@ -159,17 +199,30 @@ import React, { useState, useRef } from 'react';
             <main>
               <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
+
                   <div className="flex flex-col gap-2">
-                    <label htmlFor="ai-model" className="font-medium text-white flex items-center gap-2"><Bot size={18} />Выберите нейросеть</label>
-                    <select
-                      id="ai-model"
-                      className="bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                    >
-                      <option>ChatGPT 4.0</option>
-                      <option>Gemini Pro</option>
-                    </select>
+                    <label className="font-medium text-white flex items-center gap-2"><Bot size={18} />Выберите нейросеть и модель</label>
+                    <div className="flex gap-2">
+                      <select
+                        id="ai-provider"
+                        className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                        value={selectedProvider}
+                        onChange={handleProviderChange}
+                      >
+                        <option value="OpenAI">ChatGPT</option>
+                        <option value="Google">Gemini</option>
+                      </select>
+                      <select
+                        id="ai-model"
+                        className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                      >
+                        {modelOptions[selectedProvider].map(model => (
+                          <option key={model.value} value={model.value}>{model.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   <div className="flex flex-col gap-2">
@@ -181,12 +234,25 @@ import React, { useState, useRef } from 'react';
                         placeholder="Введите ваш API ключ..."
                         className="flex-grow bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none"
                         value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
+                        onChange={(e) => {
+                          setApiKey(e.target.value);
+                          setApiKeyStatus('idle'); // Сбрасываем статус при изменении ключа
+                        }}
                       />
-                      <button onClick={checkApiKey} className="bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-md transition-colors">Проверить</button>
+                      <button
+                        onClick={checkApiKey}
+                        className="bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-md transition-colors w-28 flex justify-center"
+                        disabled={isCheckingApiKey}
+                      >
+                        {isCheckingApiKey ? <LoaderCircle size={18} className="animate-spin" /> : 'Проверить'}
+                      </button>
                       <div className="w-6 h-6 flex items-center justify-center">
-                        {apiKeyStatus === 'valid' && <CheckCircle className="text-green-500" />}
-                        {apiKeyStatus === 'invalid' && <XCircle className="text-red-500" />}
+                        {isCheckingApiKey ? <LoaderCircle size={20} className="animate-spin text-gray-500" /> : (
+                          <>
+                            {apiKeyStatus === 'valid' && <CheckCircle className="text-green-500" />}
+                            {apiKeyStatus === 'invalid' && <XCircle className="text-red-500" />}
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
