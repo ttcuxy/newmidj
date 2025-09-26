@@ -40,38 +40,31 @@ async function validateAndGetModels(apiKey, provider, signal) {
 /**
  * Обработчик для Vercel Serverless Function.
  * Валидирует ключ API синхронно с тайм-аутом 8 секунд.
- * @param {Request} req
- * @returns {Promise<Response>}
+ * @param {import('http').IncomingMessage} request
+ * @param {import('http').ServerResponse} response
  */
-export default async function handler(req) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: `Метод ${req.method} не разрешен` }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+export default async function handler(request, response) {
+  if (request.method !== 'POST') {
+    response.setHeader('Allow', ['POST']);
+    return response.status(405).json({ error: `Метод ${request.method} не разрешен` });
   }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-секундный тайм-аут
 
   try {
-    const { apiKey, provider } = await req.json();
+    // Vercel автоматически парсит JSON тело, если Content-Type правильный
+    const { apiKey, provider } = request.body;
 
     if (!apiKey || !provider) {
       clearTimeout(timeoutId);
-      return new Response(JSON.stringify({ error: 'Отсутствует apiKey или provider.' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return response.status(400).json({ error: 'Отсутствует apiKey или provider.' });
     }
 
     const models = await validateAndGetModels(apiKey, provider, controller.signal);
     clearTimeout(timeoutId);
 
-    return new Response(JSON.stringify({ models }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return response.status(200).json({ models });
 
   } catch (error) {
     clearTimeout(timeoutId);
@@ -82,9 +75,6 @@ export default async function handler(req) {
       errorMessage = error.message;
     }
 
-    return new Response(JSON.stringify({ error: "Ошибка валидации", details: errorMessage }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return response.status(500).json({ error: "Ошибка валидации", details: errorMessage });
   }
 }
