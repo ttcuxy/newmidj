@@ -7,10 +7,10 @@ import OpenAI from 'openai';
      */
     export default async function handler(req, res) {
       if (req.method !== 'POST') {
-        res.setHeader('Allow', ['POST']);
-        res.statusCode = 405;
-        res.end(`Method ${req.method} Not Allowed`);
-        return;
+        return {
+          statusCode: 405,
+          body: `Method ${req.method} Not Allowed`,
+        };
       }
 
       try {
@@ -22,10 +22,10 @@ import OpenAI from 'openai';
         const { apiKey, provider } = JSON.parse(body);
 
         if (!apiKey || !provider) {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: 'Missing apiKey or provider.' }));
-          return;
+          return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Missing apiKey or provider.' }),
+          };
         }
 
         let models = [];
@@ -62,20 +62,22 @@ import OpenAI from 'openai';
             .reverse();
 
         } else {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: `Unsupported provider: ${provider}` }));
-          return;
+          return {
+            statusCode: 400,
+            body: JSON.stringify({ error: `Unsupported provider: ${provider}` }),
+          };
         }
 
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ models }));
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ models }),
+        };
 
       } catch (error) {
         console.error("Error during key validation:", error);
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: "Internal Server Error", details: error.message }));
+        return {
+          statusCode: 500,
+          body: JSON.stringify({ error: "Internal Server Error", details: error.message }),
+        };
       }
     }
