@@ -53,8 +53,7 @@ import React, { useState, useRef } from 'react';
         }
         setIsCheckingApiKey(true);
         setApiKeyStatus('idle');
-        setAvailableModels([]);
-        setSelectedModel('');
+        setAvailableModels([]); // Очищаем старый список моделей
 
         try {
           const response = await fetch('/api/validate-key', {
@@ -69,18 +68,23 @@ import React, { useState, useRef } from 'react';
           const data = await response.json();
 
           if (!response.ok) {
-            throw new Error(data.details || 'Ошибка проверки ключа.');
+            throw new Error(data.details || 'Ошибка сервера при проверке ключа.');
           }
 
           setApiKeyStatus('valid');
           setAvailableModels(data.models);
+          // Устанавливаем первую модель из списка как выбранную по умолчанию
           if (data.models && data.models.length > 0) {
             setSelectedModel(data.models[0]);
+          } else {
+            setSelectedModel('');
           }
 
         } catch (error) {
           console.error('Ошибка при проверке API ключа:', error);
           setApiKeyStatus('invalid');
+          setAvailableModels([]);
+          setSelectedModel('');
         } finally {
           setIsCheckingApiKey(false);
         }
