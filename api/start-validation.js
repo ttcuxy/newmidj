@@ -39,6 +39,36 @@ async function validateAndGetModels(apiKey, provider) {
 }
 
 /**
+ * Вспомогательная функция для парсинга тела JSON из запроса.
+ * @param {import('http').IncomingMessage} req
+ * @returns {Promise<any>}
+ */
+function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        // Если тело пустое, возвращаем пустой объект
+        if (!body) {
+          resolve({});
+          return;
+        }
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+
+/**
  * Обработчик для запуска асинхронной валидации ключа.
  * @param {import('http').IncomingMessage} req
  * @param {import('http').ServerResponse} res
@@ -52,11 +82,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    let body = '';
-    for await (const chunk of req) {
-      body += chunk;
-    }
-    const { apiKey, provider } = JSON.parse(body);
+    const { apiKey, provider } = await parseJsonBody(req);
 
     if (!apiKey || !provider) {
       return {
