@@ -39,36 +39,6 @@ async function validateAndGetModels(apiKey, provider) {
 }
 
 /**
- * Вспомогательная функция для парсинга тела JSON из запроса.
- * @param {import('http').IncomingMessage} req
- * @returns {Promise<any>}
- */
-function parseJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        // Если тело пустое, возвращаем пустой объект
-        if (!body) {
-          resolve({});
-          return;
-        }
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(new Error('Invalid JSON body'));
-      }
-    });
-    req.on('error', (err) => {
-      reject(err);
-    });
-  });
-}
-
-
-/**
  * Обработчик для запуска асинхронной валидации ключа.
  * @param {import('http').IncomingMessage} req
  * @param {import('http').ServerResponse} res
@@ -82,7 +52,17 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { apiKey, provider } = await parseJsonBody(req);
+    if (!req.body) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "Request body is empty or not parsed." }),
+      };
+    }
+
+    // Vercel может передавать тело как строку, а Netlify - как уже готовый объект.
+    // Этот код обрабатывает оба случая.
+    const data = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { apiKey, provider } = data;
 
     if (!apiKey || !provider) {
       return {
@@ -112,6 +92,12 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error("Error starting validation:", error);
+    if (error instanceof SyntaxError) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "Invalid JSON in request body." }),
+      };
+    }
     return {
       statusCode: 500,
       body: JSON.stringify({ error: "Internal Server Error", details: error.message }),
