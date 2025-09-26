@@ -57,8 +57,7 @@ import React, { useState, useRef } from 'react';
         setSelectedModel('');
 
         try {
-          // 1. Запускаем задачу валидации и получаем jobId
-          const startResponse = await fetch('/api/start-validation', {
+          const response = await fetch('/api/validate-key', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -67,54 +66,22 @@ import React, { useState, useRef } from 'react';
             }),
           });
 
-          if (!startResponse.ok) {
-            const errorData = await startResponse.json();
-            throw new Error(errorData.details || 'Не удалось запустить проверку ключа.');
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.details || 'Ошибка проверки ключа.');
           }
 
-          const { jobId } = await startResponse.json();
+          setApiKeyStatus('valid');
+          setAvailableModels(data.models);
+          if (data.models && data.models.length > 0) {
+            setSelectedModel(data.models[0]);
+          }
 
-          // 2. Опрашиваем статус задачи каждые 2 секунды
-          const intervalId = setInterval(async () => {
-            try {
-              const statusResponse = await fetch(`/api/get-validation-status?jobId=${jobId}`);
-              if (!statusResponse.ok) {
-                // Если сервер вернул ошибку при опросе, прекращаем
-                console.error('Ошибка при получении статуса проверки.');
-                clearInterval(intervalId);
-                setApiKeyStatus('invalid');
-                setIsCheckingApiKey(false);
-                return;
-              }
-
-              const job = await statusResponse.json();
-
-              if (job.status === 'success') {
-                clearInterval(intervalId);
-                setApiKeyStatus('valid');
-                setAvailableModels(job.models);
-                if (job.models && job.models.length > 0) {
-                  setSelectedModel(job.models[0]);
-                }
-                setIsCheckingApiKey(false);
-              } else if (job.status === 'error') {
-                clearInterval(intervalId);
-                setApiKeyStatus('invalid');
-                console.error('Ошибка проверки ключа:', job.message);
-                setIsCheckingApiKey(false);
-              }
-              // Если статус 'pending', ничего не делаем, ждем следующего опроса
-            } catch (pollError) {
-              console.error('Критическая ошибка при опросе статуса:', pollError);
-              clearInterval(intervalId);
-              setApiKeyStatus('invalid');
-              setIsCheckingApiKey(false);
-            }
-          }, 2000);
-
-        } catch (startError) {
-          console.error('Ошибка при запуске проверки API ключа:', startError);
+        } catch (error) {
+          console.error('Ошибка при проверке API ключа:', error);
           setApiKeyStatus('invalid');
+        } finally {
           setIsCheckingApiKey(false);
         }
       };

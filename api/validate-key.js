@@ -1,83 +1,90 @@
 import OpenAI from 'openai';
 
-    /**
-     * Обработчик для получения списка моделей на основе API ключа
-     * @param {import('http').IncomingMessage} req
-     * @param {import('http').ServerResponse} res
-     */
-    export default async function handler(req, res) {
-      if (req.method !== 'POST') {
-        return {
-          statusCode: 405,
-          body: `Method ${req.method} Not Allowed`,
-        };
-      }
-
-      try {
-        let body = '';
-        for await (const chunk of req) {
-          body += chunk;
-        }
-
-        const { apiKey, provider } = JSON.parse(body);
-
-        if (!apiKey || !provider) {
-          return {
-            statusCode: 400,
-            body: JSON.stringify({ error: 'Missing apiKey or provider.' }),
-          };
-        }
-
-        let models = [];
-
-        if (provider.toLowerCase() === 'openai') {
-          const openai = new OpenAI({ apiKey });
-          const modelsList = await openai.models.list();
-          // Фильтруем и оставляем только gpt модели, чтобы не было лишнего
-          models = modelsList.data
-            .filter(model => model.id.startsWith('gpt'))
-            .map(model => model.id)
-            .sort()
-            .reverse();
-
-        } else if (provider.toLowerCase() === 'google') {
-          // Для Google Gemini API используем REST API для получения списка моделей,
-          // так как SDK не предоставляет прямого метода listModels()
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'Invalid Google API Key or API is not enabled.');
-          }
-
-          const data = await response.json();
-          // Фильтруем модели, которые поддерживают генерацию контента и являются "tuned" (основными)
-          models = data.models
-            .filter(model =>
-              model.supportedGenerationMethods.includes('generateContent') &&
-              model.name.includes('gemini') // Убедимся, что это Gemini модель
-            )
-            .map(model => model.name.replace('models/', '')) // Убираем префикс 'models/'
-            .sort()
-            .reverse();
-
-        } else {
-          return {
-            statusCode: 400,
-            body: JSON.stringify({ error: `Unsupported provider: ${provider}` }),
-          };
-        }
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ models }),
-        };
-
-      } catch (error) {
-        console.error("Error during key validation:", error);
-        return {
-          statusCode: 500,
-          body: JSON.stringify({ error: "Internal Server Error", details: error.message }),
-        };
-      }
+/**
+ * Асинхронно валидирует API ключ и получает список моделей с тайм-аутом.
+ * @param {string} apiKey - API ключ
+ * @param {string} provider - 'OpenAI' или 'Google'
+ * @param {AbortSignal} signal - Сигнал для прерывания запроса
+ */
+async function validateAndGetModels(apiKey, provider, signal) {
+  let models = [];
+  if (provider === 'OpenAI') {
+    const openai = new OpenAI({ apiKey });
+    const modelsList = await openai.models.list({ signal });
+    models = modelsList.data
+      .filter(model => model.id.startsWith('gpt'))
+      .map(model => model.id)
+      .sort()
+      .reverse();
+  } else if (provider === 'Google') {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, { signal });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || 'Неверный ключ Google API или API не включен.');
     }
+    const data = await response.json();
+    models = data.models
+      .filter(model =>
+        model.supportedGenerationMethods.includes('generateContent') &&
+        model.name.includes('gemini')
+      )
+      .map(model => model.name.replace('models/', ''))
+      .sort()
+      .reverse();
+  } else {
+    throw new Error(`Неподдерживаемый провайдер: ${provider}`);
+  }
+  return models;
+}
+
+/**
+ * Обработчик для Vercel Serverless Function.
+ * Валидирует ключ API синхронно с тайм-аутом 8 секунд.
+ * @param {Request} req
+ * @returns {Promise<Response>}
+ */
+export default async function handler(req) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: `Метод ${req.method} не разрешен` }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-секундный тайм-аут
+
+  try {
+    const { apiKey, provider } = await req.json();
+
+    if (!apiKey || !provider) {
+      clearTimeout(timeoutId);
+      return new Response(JSON.stringify({ error: 'Отсутствует apiKey или provider.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const models = await validateAndGetModels(apiKey, provider, controller.signal);
+    clearTimeout(timeoutId);
+
+    return new Response(JSON.stringify({ models }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    clearTimeout(timeoutId);
+    let errorMessage = "Произошла неизвестная ошибка.";
+    if (error.name === 'AbortError') {
+      errorMessage = "Проверка прервалась по тайм-ауту (8 секунд).";
+    } else if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+
+    return new Response(JSON.stringify({ error: "Ошибка валидации", details: errorMessage }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
